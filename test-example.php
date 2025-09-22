@@ -21,7 +21,7 @@ class TestMskIamAuth extends MskIamAuth
 }
 
 try {
-    $region = $_ENV['AWS_REGION'] ?? 'us-east-1';
+    $region = $_ENV['AWS_REGION'] ?? 'eu-central-1';
     $auth = new TestMskIamAuth($region);
 
     echo "Generating AWS MSK IAM auth token (test mode)...\n";

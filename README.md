@@ -86,20 +86,27 @@ $producer = new RdKafka\Producer($conf);
 
 ## Testing
 
-### Local Testing (with PHP)
-```bash
-# Basic test with mock credentials
-php test-example.php
+### Unit Testing with Docker
 
-# Simple example (will try real credentials first)
-php simple-example.php
+```bash
+# Run complete test suite
+docker build -t msk-iam-auth-dev .
+docker run --rm msk-iam-auth-dev composer test
+
+# Run PHPStan static analysis
+docker run --rm msk-iam-auth-dev composer phpstan
+
+# Run both tests and static analysis
+docker run --rm msk-iam-auth-dev composer check
 ```
 
-### Docker Testing (if you don't have PHP locally)
+### Simple Testing Examples
 ```bash
-# Build and test with mock credentials
-docker build -t msk-iam-auth-test .
-docker run --rm -e AWS_REGION=eu-central-1 msk-iam-auth-test php test-example.php
+# Test with mock credentials (no network calls)
+docker run --rm msk-iam-auth-dev php test-example.php
+
+# Test with real credentials (requires EKS/EC2 environment)
+docker run --rm msk-iam-auth-dev php simple-example.php
 ```
 
 ## AWS IAM Setup for EKS
@@ -116,7 +123,7 @@ Your IAM role needs these MSK permissions:
             "Effect": "Allow",
             "Action": [
                 "kafka-cluster:Connect",
-                "kafka-cluster:ReadData",
+                "kafka-cluster:ReadData"
             ],
             "Resource": "arn:aws:kafka:eu-central-1:123456789012:cluster/your-cluster-name/*"
         }

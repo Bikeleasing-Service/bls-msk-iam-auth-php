@@ -3,7 +3,7 @@
 require_once __DIR__ . '/src/MskIamAuth.php';
 
 try {
-    $region = $_ENV['AWS_REGION'] ?? 'us-east-1';
+    $region = $_ENV['AWS_REGION'] ?? 'eu-central-1';
     $auth = new MskIamAuth($region);
 
     echo "Generating AWS MSK IAM auth token...\n";
