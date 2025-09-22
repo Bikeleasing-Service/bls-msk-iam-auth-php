@@ -2,14 +2,16 @@
 
 declare(strict_types=1);
 
+namespace Bls\MskIamAuth;
+
 class MskIamAuth
 {
-    private const SIGNING_SERVICE = 'kafka-cluster';
-    private const HTTP_METHOD = 'GET';
-    private const ACTION_VALUE = 'kafka-cluster:Connect';
-    private const EXPIRY_IN_SECONDS = 900;
+    protected const SIGNING_SERVICE = 'kafka-cluster';
+    protected const HTTP_METHOD = 'GET';
+    protected const ACTION_VALUE = 'kafka-cluster:Connect';
+    protected const EXPIRY_IN_SECONDS = 900;
 
-    private string $region;
+    protected string $region;
 
     public function __construct(string $region)
     {
@@ -34,6 +36,10 @@ class MskIamAuth
         return rtrim(base64_encode($signedUrl), '=');
     }
 
+    /**
+     * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string|null, expiration: DateTime|null}
+     * @throws RuntimeException
+     */
     protected function getCredentials(): array
     {
         // Try EKS service account web identity token first
@@ -45,7 +51,10 @@ class MskIamAuth
         return $this->getIMDSCredentials();
     }
 
-    private function getWebIdentityCredentials(): ?array
+    /**
+     * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string, expiration: DateTime}|null
+     */
+    protected function getWebIdentityCredentials(): ?array
     {
         $tokenFile = $_ENV['AWS_WEB_IDENTITY_TOKEN_FILE'] ?? '/var/run/secrets/kubernetes.io/serviceaccount/token';
         $roleArn = $_ENV['AWS_ROLE_ARN'] ?? null;
@@ -62,7 +71,13 @@ class MskIamAuth
         return $this->assumeRoleWithWebIdentity($roleArn, $webIdentityToken);
     }
 
-    private function assumeRoleWithWebIdentity(string $roleArn, string $webIdentityToken): array
+    /**
+     * @param string $roleArn
+     * @param string $webIdentityToken
+     * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string, expiration: DateTime}
+     * @throws Exception
+     */
+    protected function assumeRoleWithWebIdentity(string $roleArn, string $webIdentityToken): array
     {
         $stsEndpoint = "https://sts.{$this->region}.amazonaws.com/";
 
@@ -79,7 +94,7 @@ class MskIamAuth
 
         if (!$xml || isset($xml->Error)) {
             $errorMsg = isset($xml->Error) ? (string)$xml->Error->Message : 'Failed to assume role';
-            throw new RuntimeException("STS AssumeRoleWithWebIdentity failed: $errorMsg");
+            throw new \RuntimeException("STS AssumeRoleWithWebIdentity failed: $errorMsg");
         }
 
         $credentials = $xml->AssumeRoleWithWebIdentityResult->Credentials;
@@ -88,11 +103,15 @@ class MskIamAuth
             'accessKeyId' => (string)$credentials->AccessKeyId,
             'secretAccessKey' => (string)$credentials->SecretAccessKey,
             'sessionToken' => (string)$credentials->SessionToken,
-            'expiration' => new DateTime((string)$credentials->Expiration)
+            'expiration' => new \DateTime((string)$credentials->Expiration)
         ];
     }
 
-    private function getIMDSCredentials(): array
+    /**
+     * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string, expiration: DateTime}
+     * @throws Exception
+     */
+    protected function getIMDSCredentials(): array
     {
         $token = $this->getIMDSv2Token();
 
@@ -110,11 +129,11 @@ class MskIamAuth
             'accessKeyId' => $credentials['AccessKeyId'],
             'secretAccessKey' => $credentials['SecretAccessKey'],
             'sessionToken' => $credentials['Token'],
-            'expiration' => new DateTime($credentials['Expiration'])
+            'expiration' => new \DateTime($credentials['Expiration'])
         ];
     }
 
-    private function getIMDSv2Token(): string
+    protected function getIMDSv2Token(): string
     {
         return $this->httpRequest(
             'http://169.254.169.254/latest/api/token',
@@ -123,6 +142,11 @@ class MskIamAuth
         );
     }
 
+    /**
+     * @param array{method: string, hostname: string, path: string, query: array<string, string>, headers: array<string, string>} $request
+     * @param array{accessKeyId: string, secretAccessKey: string, sessionToken: string|null, expiration: DateTime|null} $credentials
+     * @return string
+     */
     private function signRequest(array $request, array $credentials): string
     {
         $datetime = gmdate('Ymd\THis\Z');
@@ -130,11 +154,16 @@ class MskIamAuth
 
         $credentialScope = "{$date}/{$this->region}/" . self::SIGNING_SERVICE . "/aws4_request";
 
+        // Calculate TTL based on credential expiration
+        $ttl = isset($credentials['expiration']) && $credentials['expiration'] instanceof \DateTime
+            ? min(($credentials['expiration']->getTimestamp() - time()), self::EXPIRY_IN_SECONDS)
+            : self::EXPIRY_IN_SECONDS;
+
         $query = array_merge($request['query'], [
             'X-Amz-Algorithm' => 'AWS4-HMAC-SHA256',
             'X-Amz-Credential' => $credentials['accessKeyId'] . '/' . $credentialScope,
             'X-Amz-Date' => $datetime,
-            'X-Amz-Expires' => self::EXPIRY_IN_SECONDS,
+            'X-Amz-Expires' => $ttl,
             'X-Amz-SignedHeaders' => 'host'
         ]);
 
@@ -168,7 +197,7 @@ class MskIamAuth
         return "https://{$request['hostname']}{$request['path']}?" . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
-    private function calculateSignature(string $stringToSign, string $secretKey, string $date): string
+    protected function calculateSignature(string $stringToSign, string $secretKey, string $date): string
     {
         $kDate = hash_hmac('sha256', $date, 'AWS4' . $secretKey, true);
         $kRegion = hash_hmac('sha256', $this->region, $kDate, true);
@@ -178,7 +207,15 @@ class MskIamAuth
         return hash_hmac('sha256', $stringToSign, $kSigning);
     }
 
-    private function httpRequest(string $url, array $headers = [], string $method = 'GET', string $body = ''): string
+    /**
+     * @param string $url
+     * @param array<string, string> $headers
+     * @param string $method
+     * @param string $body
+     * @return string
+     * @throws RuntimeException
+     */
+    protected function httpRequest(string $url, array $headers = [], string $method = 'GET', string $body = ''): string
     {
         $contextOptions = [
             'http' => [

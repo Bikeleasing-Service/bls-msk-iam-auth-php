@@ -8,8 +8,25 @@
         "ext-json": "*",
         "ext-simplexml": "*"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.0"
+    },
     "autoload": {
-        "files": ["src/MskIamAuth.php"]
+        "psr-4": {
+            "Bls\\MskIamAuth\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MskIamAuth\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testdox",
+        "test-coverage": "phpunit --coverage-html coverage/",
+        "phpstan": "phpstan analyse",
+        "check": ["@phpstan", "@test"]
     },
     "config": {
         "optimize-autoloader": true

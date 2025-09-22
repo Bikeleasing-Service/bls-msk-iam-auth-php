@@ -1,5 +1,7 @@
 /.idea/
 /*.iml
 /composer.phar
-/composer.lock
 /vendor/
+/coverage/
+/.phpunit.cache/
+/.phpunit.result.cache
