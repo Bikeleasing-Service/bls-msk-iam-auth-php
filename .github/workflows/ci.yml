@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  phpstan:
+    name: PHPStan Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build Docker image
+        run: docker build -t msk-iam-auth-php .
+
+      - name: Run PHPStan
+        run: docker run --rm msk-iam-auth-php composer phpstan
+
+  test:
+    name: PHPUnit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build Docker image
+        run: docker build -t msk-iam-auth-php .
+
+      - name: Run Tests
+        run: docker run --rm msk-iam-auth-php composer test
