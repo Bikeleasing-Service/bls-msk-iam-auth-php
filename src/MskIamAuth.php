@@ -1,0 +1,211 @@
+<?php
+
+declare(strict_types=1);
+
+class MskIamAuth
+{
+    private const SIGNING_SERVICE = 'kafka-cluster';
+    private const HTTP_METHOD = 'GET';
+    private const ACTION_VALUE = 'kafka-cluster:Connect';
+    private const EXPIRY_IN_SECONDS = 900;
+
+    private string $region;
+
+    public function __construct(string $region)
+    {
+        $this->region = $region;
+    }
+
+    public function generateAuthToken(): string
+    {
+        $credentials = $this->getCredentials();
+        $hostname = "kafka.{$this->region}.amazonaws.com";
+
+        $request = [
+            'method' => self::HTTP_METHOD,
+            'hostname' => $hostname,
+            'path' => '/',
+            'query' => ['Action' => self::ACTION_VALUE],
+            'headers' => ['host' => $hostname]
+        ];
+
+        $signedUrl = $this->signRequest($request, $credentials);
+
+        return rtrim(base64_encode($signedUrl), '=');
+    }
+
+    protected function getCredentials(): array
+    {
+        // Try EKS service account web identity token first
+        if ($webIdentityCredentials = $this->getWebIdentityCredentials()) {
+            return $webIdentityCredentials;
+        }
+
+        // Fallback to EC2 instance metadata (for EC2-based deployments)
+        return $this->getIMDSCredentials();
+    }
+
+    private function getWebIdentityCredentials(): ?array
+    {
+        $tokenFile = $_ENV['AWS_WEB_IDENTITY_TOKEN_FILE'] ?? '/var/run/secrets/kubernetes.io/serviceaccount/token';
+        $roleArn = $_ENV['AWS_ROLE_ARN'] ?? null;
+
+        if (!$roleArn || !file_exists($tokenFile)) {
+            return null;
+        }
+
+        $webIdentityToken = file_get_contents($tokenFile);
+        if (!$webIdentityToken) {
+            return null;
+        }
+
+        return $this->assumeRoleWithWebIdentity($roleArn, $webIdentityToken);
+    }
+
+    private function assumeRoleWithWebIdentity(string $roleArn, string $webIdentityToken): array
+    {
+        $stsEndpoint = "https://sts.{$this->region}.amazonaws.com/";
+
+        $params = [
+            'Action' => 'AssumeRoleWithWebIdentity',
+            'RoleArn' => $roleArn,
+            'RoleSessionName' => 'msk-iam-auth-' . time(),
+            'WebIdentityToken' => $webIdentityToken,
+            'Version' => '2011-06-15'
+        ];
+
+        $response = $this->httpRequest($stsEndpoint, [], 'POST', http_build_query($params));
+        $xml = simplexml_load_string($response);
+
+        if (!$xml || isset($xml->Error)) {
+            $errorMsg = isset($xml->Error) ? (string)$xml->Error->Message : 'Failed to assume role';
+            throw new RuntimeException("STS AssumeRoleWithWebIdentity failed: $errorMsg");
+        }
+
+        $credentials = $xml->AssumeRoleWithWebIdentityResult->Credentials;
+
+        return [
+            'accessKeyId' => (string)$credentials->AccessKeyId,
+            'secretAccessKey' => (string)$credentials->SecretAccessKey,
+            'sessionToken' => (string)$credentials->SessionToken,
+            'expiration' => new DateTime((string)$credentials->Expiration)
+        ];
+    }
+
+    private function getIMDSCredentials(): array
+    {
+        $token = $this->getIMDSv2Token();
+
+        $role = $this->httpRequest(
+            'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+            ['X-aws-ec2-metadata-token' => $token]
+        );
+
+        $credentials = json_decode($this->httpRequest(
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/{$role}",
+            ['X-aws-ec2-metadata-token' => $token]
+        ), true);
+
+        return [
+            'accessKeyId' => $credentials['AccessKeyId'],
+            'secretAccessKey' => $credentials['SecretAccessKey'],
+            'sessionToken' => $credentials['Token'],
+            'expiration' => new DateTime($credentials['Expiration'])
+        ];
+    }
+
+    private function getIMDSv2Token(): string
+    {
+        return $this->httpRequest(
+            'http://169.254.169.254/latest/api/token',
+            ['X-aws-ec2-metadata-token-ttl-seconds' => '21600'],
+            'PUT'
+        );
+    }
+
+    private function signRequest(array $request, array $credentials): string
+    {
+        $datetime = gmdate('Ymd\THis\Z');
+        $date = substr($datetime, 0, 8);
+
+        $credentialScope = "{$date}/{$this->region}/" . self::SIGNING_SERVICE . "/aws4_request";
+
+        $query = array_merge($request['query'], [
+            'X-Amz-Algorithm' => 'AWS4-HMAC-SHA256',
+            'X-Amz-Credential' => $credentials['accessKeyId'] . '/' . $credentialScope,
+            'X-Amz-Date' => $datetime,
+            'X-Amz-Expires' => self::EXPIRY_IN_SECONDS,
+            'X-Amz-SignedHeaders' => 'host'
+        ]);
+
+        if (isset($credentials['sessionToken'])) {
+            $query['X-Amz-Security-Token'] = $credentials['sessionToken'];
+        }
+
+        ksort($query);
+        $queryString = http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+
+        $canonicalRequest = implode("\n", [
+            $request['method'],
+            $request['path'],
+            $queryString,
+            "host:{$request['hostname']}",
+            '',
+            'host',
+            hash('sha256', '')
+        ]);
+
+        $stringToSign = implode("\n", [
+            'AWS4-HMAC-SHA256',
+            $datetime,
+            $credentialScope,
+            hash('sha256', $canonicalRequest)
+        ]);
+
+        $signature = $this->calculateSignature($stringToSign, $credentials['secretAccessKey'], $date);
+        $query['X-Amz-Signature'] = $signature;
+
+        return "https://{$request['hostname']}{$request['path']}?" . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    private function calculateSignature(string $stringToSign, string $secretKey, string $date): string
+    {
+        $kDate = hash_hmac('sha256', $date, 'AWS4' . $secretKey, true);
+        $kRegion = hash_hmac('sha256', $this->region, $kDate, true);
+        $kService = hash_hmac('sha256', self::SIGNING_SERVICE, $kRegion, true);
+        $kSigning = hash_hmac('sha256', 'aws4_request', $kService, true);
+
+        return hash_hmac('sha256', $stringToSign, $kSigning);
+    }
+
+    private function httpRequest(string $url, array $headers = [], string $method = 'GET', string $body = ''): string
+    {
+        $contextOptions = [
+            'http' => [
+                'method' => $method,
+                'header' => implode("\r\n", array_map(
+                    fn($k, $v) => "$k: $v",
+                    array_keys($headers),
+                    $headers
+                )),
+                'timeout' => 10
+            ]
+        ];
+
+        if ($body) {
+            $contextOptions['http']['content'] = $body;
+            if (!isset($headers['Content-Type'])) {
+                $contextOptions['http']['header'] .= "\r\nContent-Type: application/x-www-form-urlencoded";
+            }
+        }
+
+        $context = stream_context_create($contextOptions);
+        $result = file_get_contents($url, false, $context);
+
+        if ($result === false) {
+            throw new RuntimeException("Failed to fetch from $url");
+        }
+
+        return $result;
+    }
+}

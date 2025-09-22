@@ -1,30 +1,18 @@
 {
     "name": "bls/msk-iam-auth",
-    "description": "AWS IAM authentication for Apache Kafka MSK clusters",
+    "description": "Simple AWS IAM authentication for Apache Kafka MSK clusters",
     "type": "library",
     "license": "Apache-2.0",
     "require": {
-        "php": "^8.3",
+        "php": "^8.1",
         "ext-json": "*",
-        "ext-curl": "*",
-        "guzzlehttp/guzzle": "^7.0"
-    },
-    "require-dev": {
-        "phpunit/phpunit": "^10.0"
+        "ext-simplexml": "*"
     },
     "autoload": {
-        "psr-4": {
-            "AwsMskIamAuth\\": "src/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "AwsMskIamAuth\\Tests\\": "tests/"
-        }
+        "files": ["src/MskIamAuth.php"]
     },
     "config": {
-        "optimize-autoloader": true,
-        "sort-packages": true
+        "optimize-autoloader": true
     },
     "minimum-stability": "stable",
     "prefer-stable": true
