@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bls\MskIamAuth;
 
+use DateTime;
+
 class MskIamAuth
 {
     protected const SIGNING_SERVICE = 'kafka-cluster';
@@ -38,7 +40,7 @@ class MskIamAuth
 
     /**
      * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string|null, expiration: DateTime|null}
-     * @throws RuntimeException
+     * @throws \RuntimeException
      */
     protected function getCredentials(): array
     {
@@ -75,7 +77,7 @@ class MskIamAuth
      * @param string $roleArn
      * @param string $webIdentityToken
      * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string, expiration: DateTime}
-     * @throws Exception
+     * @throws \Exception
      */
     protected function assumeRoleWithWebIdentity(string $roleArn, string $webIdentityToken): array
     {
@@ -109,7 +111,7 @@ class MskIamAuth
 
     /**
      * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: string, expiration: DateTime}
-     * @throws Exception
+     * @throws \Exception
      */
     protected function getIMDSCredentials(): array
     {
@@ -129,7 +131,7 @@ class MskIamAuth
             'accessKeyId' => $credentials['AccessKeyId'],
             'secretAccessKey' => $credentials['SecretAccessKey'],
             'sessionToken' => $credentials['Token'],
-            'expiration' => new \DateTime($credentials['Expiration'])
+            'expiration' => new DateTime($credentials['Expiration'])
         ];
     }
 
@@ -213,7 +215,7 @@ class MskIamAuth
      * @param string $method
      * @param string $body
      * @return string
-     * @throws RuntimeException
+     * @throws \RuntimeException
      */
     protected function httpRequest(string $url, array $headers = [], string $method = 'GET', string $body = ''): string
     {
@@ -240,7 +242,7 @@ class MskIamAuth
         $result = file_get_contents($url, false, $context);
 
         if ($result === false) {
-            throw new RuntimeException("Failed to fetch from $url");
+            throw new \RuntimeException("Failed to fetch from $url");
         }
 
         return $result;
