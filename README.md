@@ -1,5 +1,7 @@
 # AWS MSK IAM Auth PHP
 
+[![CI](https://github.com/Bikeleasing-Service/bls-msk-iam-auth-php/actions/workflows/ci.yml/badge.svg)](https://github.com/Bikeleasing-Service/bls-msk-iam-auth-php/actions/workflows/ci.yml)
+
 Simple PHP library for generating AWS MSK IAM authentication tokens. 
 Designed for EKS environments using IAM roles for service accounts.
 
